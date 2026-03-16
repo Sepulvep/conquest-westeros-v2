@@ -25,7 +25,6 @@
     display: block;
     touch-action: none;
   }
-  #send-buttons { display: none; }
   #debug-btn {
     position: fixed;
     top: 8px;
@@ -62,14 +61,9 @@
 </head>
 <body>
 <div id="game-wrap">
-  <div id="send-buttons">
-    <button data-ratio="0.25" class="active">25%</button>
-    <button data-ratio="0.5">50%</button>
-    <button data-ratio="1">100%</button>
-  </div>
   <canvas id="gameCanvas"></canvas>
 </div>
-<button id="debug-btn">Debug</button>
+<button id="debug-btn" style="display:none">Debug</button>
 <div id="debug-panel">
   <h3>Debug Menu</h3>
   <label><input type="checkbox" id="dbg-edit"> Edit castle positions</label>
@@ -84,6 +78,7 @@
   <pre id="dbg-export-output" style="display:none; font-size:9px; max-height:200px; overflow:auto; background:#0f172a; padding:6px; border-radius:4px; margin-top:6px; word-break:break-all; user-select:all;"></pre>
 </div>
 <script>
+const DEBUG = false;
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -119,11 +114,11 @@ const HOUSES = {
 
 // ─── CASTLES ──────────────────────────────────────────────
 const CASTLE_DEFS = [
-  { id: 'winterfell',  house: 'stark',     owner: 'player',  troops: 100, px: 0.5402, py: 0.2698, name: 'Winterfell' },
+  { id: 'winterfell',  house: 'stark',     owner: 'neutral', troops: 50,  px: 0.5402, py: 0.2698, name: 'Winterfell' },
   { id: 'pyke',        house: 'greyjoy',   owner: 'neutral', troops: 50,  px: 0.1501, py: 0.4020, name: 'Pyke' },
   { id: 'riverrun',    house: 'tully',     owner: 'neutral', troops: 50,  px: 0.4474, py: 0.5697, name: 'Riverrun' },
   { id: 'casterly',    house: 'lannister', owner: 'neutral', troops: 50,  px: 0.1832, py: 0.6469, name: 'Casterly Rock' },
-  { id: 'dragonstone', house: 'targaryen', owner: 'neutral', troops: 50,  px: 0.6313, py: 0.7579, name: 'Dragonstone' },
+  { id: 'dragonstone', house: 'targaryen', owner: 'player',  troops: 100, px: 0.6313, py: 0.7579, name: "King's Landing" },
   { id: 'stormsend',   house: 'baratheon', owner: 'neutral', troops: 50,  px: 0.9072, py: 0.6979, name: "Storm's End" },
   { id: 'sunspear',    house: 'martell',   owner: 'neutral', troops: 50,  px: 0.7364, py: 0.9265, name: 'Sunspear' },
   { id: 'highgarden',  house: 'tyrell',    owner: 'neutral', troops: 50,  px: 0.2790, py: 0.8606, name: 'Highgarden' },
@@ -138,15 +133,15 @@ const AI_COOLDOWN_MIN = 80;
 const AI_COOLDOWN_MAX = 160;
 const AI_MIN_TROOPS = 20;
 const AI_GARRISON = 15;
-const AI_GRACE_MS = 2000;
+const AI_GRACE_MS = 7000;
 const AI_PLAYER_SAFETY_MS = 30000;
-const CASTLE_IMG_SIZE = 56;
-const FLEET_SPEED = 2;
+const CASTLE_IMG_SIZE = 68;
+const FLEET_SPEED = 1.28;
 
 const CASTLE_ASSETS = ['stark', 'lannister', 'targaryen', 'baratheon', 'greyjoy', 'tully', 'martell', 'tyrell', 'arryn'];
 let castleImages = {};
 let castleImagesNoBg = {};
-function removeBlackFromImage(img, threshold = 50) {
+function removeEdgeBgFromImage(img, isDark) {
   const c = document.createElement('canvas');
   const w = img.naturalWidth;
   const h = img.naturalHeight;
@@ -157,21 +152,17 @@ function removeBlackFromImage(img, threshold = 50) {
   const d = cctx.getImageData(0, 0, w, h);
   const data = d.data;
   const visited = new Uint8Array(w * h);
-  const isBlack = (idx) => data[idx] < threshold && data[idx + 1] < threshold && data[idx + 2] < threshold;
+  const isBg = isDark
+    ? (idx) => data[idx] < 50 && data[idx + 1] < 50 && data[idx + 2] < 50
+    : (idx) => data[idx] > 200 && data[idx + 1] > 200 && data[idx + 2] > 200;
   const stack = [];
-  for (let x = 0; x < w; x++) {
-    stack.push(x + 0 * w);
-    stack.push(x + (h - 1) * w);
-  }
-  for (let y = 0; y < h; y++) {
-    stack.push(0 + y * w);
-    stack.push((w - 1) + y * w);
-  }
+  for (let x = 0; x < w; x++) { stack.push(x); stack.push(x + (h - 1) * w); }
+  for (let y = 0; y < h; y++) { stack.push(y * w); stack.push((w - 1) + y * w); }
   while (stack.length) {
     const pos = stack.pop();
     if (pos < 0 || pos >= w * h || visited[pos]) continue;
     const idx = pos * 4;
-    if (!isBlack(idx)) continue;
+    if (!isBg(idx)) continue;
     visited[pos] = 1;
     data[idx + 3] = 0;
     const x = pos % w, y = (pos - x) / w;
@@ -184,12 +175,18 @@ function removeBlackFromImage(img, threshold = 50) {
   return c;
 }
 
+function removeBlackFromImage(img) { return removeEdgeBgFromImage(img, true); }
+
 let mapImage = new Image();
-mapImage.src = 'assets/map.png';
 let knightImage = new Image();
 let knightImageNoBg = null;
-knightImage.onload = () => { knightImageNoBg = removeBlackFromImage(knightImage); };
-knightImage.src = 'assets/knight.png';
+knightImage.onload = () => { try { knightImageNoBg = removeEdgeBgFromImage(knightImage, false); } catch (_) { knightImageNoBg = null; } };
+let selectionMarkerImage = new Image();
+let targetMarkerImage = new Image();
+let splashImage = new Image();
+let marchLineImage = new Image();
+let titleFireImage = new Image();
+let titleLogoImage = new Image();
 
 let castles = [];
 let fleets = [];
@@ -206,15 +203,18 @@ let debugSpeed = 1;
 let debugOverlay = false;
 let debugSpeedAccum = 0;
 let dragOffsetX = 0, dragOffsetY = 0;
+let impactParticles = [];
 const RATIO_OPTIONS = [
   { ratio: 0.25, label: '25%' },
   { ratio: 0.5,  label: '50%' },
   { ratio: 1,    label: '100%' },
 ];
-const RATIO_BTN_W = 50, RATIO_BTN_H = 32, RATIO_BTN_GAP = 6, RATIO_BTN_X = 8, RATIO_BTN_Y = 8;
+const RATIO_BTN_W = 50, RATIO_BTN_H = 32, RATIO_BTN_GAP = 6, RATIO_BTN_X = 8, RATIO_BTN_Y = 52, RATIO_LABEL_Y = 42;
 const INSTRUCTION_FADE_MS = 8000;
+const CTA_BTN_W = 90, CTA_BTN_H = 30, CTA_BTN_MARGIN = 8;
 let lastTapTime = 0;
 let lastTapCastle = null;
+let selectAllMode = false;
 
 const POSITIONS_KEY = 'conquest-westeros-castle-positions';
 
@@ -239,7 +239,7 @@ function initCastles() {
   selectedCastles = [];
   gameOver = null;
   gameStartTime = Date.now();
-  console.log('Castle owners:', castles.map(c => `${c.name}: owner=${c.owner}, house=${c.house}`));
+  if (DEBUG) console.log('Castle owners:', castles.map(c => `${c.name}: owner=${c.owner}, house=${c.house}`));
   castles.filter(c => c.owner !== 'player').forEach(c => {
     aiCooldowns[c.id] = 20 + Math.random() * 60;
   });
@@ -291,7 +291,7 @@ function runAI() {
 
     const count = Math.min(Math.floor(c.troops * ratio), available);
     if (count >= 5) {
-      console.log(`${c.name}(${c.owner}) → ${nearest.name}(${nearest.owner}) [${count} troops, keeping ${Math.floor(c.troops - count)}]`);
+      if (DEBUG) console.log(`${c.name}(${c.owner}) → ${nearest.name}(${nearest.owner}) [${count} troops, keeping ${Math.floor(c.troops - count)}]`);
       c.troops -= count;
       fleets.push({ x: c.x, y: c.y, target: nearest, troops: count, owner: c.owner, house: c.house });
       aiCooldowns[c.id] = AI_COOLDOWN_MIN + Math.random() * (AI_COOLDOWN_MAX - AI_COOLDOWN_MIN);
@@ -322,6 +322,18 @@ function update() {
           f.target.owner = f.owner;
           f.target.house = f.house;
           f.target.troops = Math.abs(f.target.troops);
+          const angle = Math.atan2(f.target.y - f.y, f.target.x - f.x);
+          const color = HOUSES[f.house]?.color || '#fff';
+          for (let p = 0; p < 10; p++) {
+            const spread = (Math.random() - 0.5) * 1.2;
+            const speed = 1.5 + Math.random() * 2;
+            impactParticles.push({
+              x: f.target.x, y: f.target.y,
+              vx: Math.cos(angle + spread) * speed,
+              vy: Math.sin(angle + spread) * speed,
+              alpha: 1, size: 2 + Math.random() * 3, color
+            });
+          }
         }
       }
       f.arrived = true;
@@ -363,45 +375,78 @@ function draw() {
     ctx.stroke();
   }
 
-  if (dragStartCastle) {
-    ctx.strokeStyle = 'rgba(201, 162, 39, 0.6)';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([6, 4]);
+  if (dragStartCastle && !debugEditMode) {
     const sources = selectedCastles.length ? selectedCastles : [dragStartCastle];
     sources.forEach(c => {
+      const dx = dragX - c.x, dy = dragY - c.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 5) return;
+      const angle = Math.atan2(dy, dx);
+      if (marchLineImage.complete && marchLineImage.naturalWidth) {
+        const tileH = 18;
+        const tileW = marchLineImage.naturalWidth * (tileH / marchLineImage.naturalHeight);
+        const count = Math.ceil(dist / tileW);
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.rotate(angle);
+        for (let t = 0; t < count; t++) {
+          ctx.drawImage(marchLineImage, t * tileW, -tileH / 2, tileW, tileH);
+        }
+        ctx.restore();
+      } else {
+        ctx.strokeStyle = 'rgba(201, 162, 39, 0.6)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(c.x, c.y);
+        ctx.lineTo(dragX, dragY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      const arrLen = 12;
+      ctx.fillStyle = 'rgba(201, 162, 39, 0.8)';
       ctx.beginPath();
-      ctx.moveTo(c.x, c.y);
-      ctx.lineTo(dragX, dragY);
-      ctx.stroke();
+      ctx.moveTo(dragX, dragY);
+      ctx.lineTo(dragX - arrLen * Math.cos(angle - 0.4), dragY - arrLen * Math.sin(angle - 0.4));
+      ctx.lineTo(dragX - arrLen * Math.cos(angle + 0.4), dragY - arrLen * Math.sin(angle + 0.4));
+      ctx.closePath();
+      ctx.fill();
     });
-    ctx.setLineDash([]);
   }
 
-  const knightSize = 28;
-  const knightHalf = knightSize / 2;
   fleets.forEach(f => {
-    if (knightImageNoBg) {
-      ctx.drawImage(knightImageNoBg, 0, 0, knightImageNoBg.width, knightImageNoBg.height, f.x - knightHalf, f.y - knightHalf, knightSize, knightSize);
+    const h = HOUSES[f.house] || HOUSES.stark;
+    const src = knightImageNoBg || (knightImage.complete && knightImage.naturalWidth ? knightImage : null);
+    const fleetH = 54;
+    const fleetW = src ? Math.round(src.width * (fleetH / src.height)) : fleetH;
+    if (src) {
+      ctx.drawImage(src, 0, 0, src.width, src.height, f.x - fleetW / 2, f.y - fleetH / 2, fleetW, fleetH);
     } else {
-      const h = HOUSES[f.house] || HOUSES.stark;
       ctx.fillStyle = h.color;
       ctx.beginPath();
-      ctx.arc(f.x, f.y, 8, 0, Math.PI * 2);
+      ctx.arc(f.x, f.y, 14, 0, Math.PI * 2);
       ctx.fill();
     }
+    const troopBadge = String(Math.floor(f.troops));
+    ctx.font = 'bold 9px Georgia';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.beginPath();
+    ctx.arc(f.x + fleetW / 2 - 4, f.y - fleetH / 2 + 4, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(troopBadge, f.x + fleetW / 2 - 4, f.y - fleetH / 2 + 4);
   });
 
+  const pulseT = Date.now() * 0.003;
   castles.forEach(c => {
     const h = HOUSES[c.house];
-    const isSelected = selectedCastles.includes(c) || dragStartCastle === c;
+    const isSelected = selectedCastles.includes(c);
+    const isPlayerCastle = c.owner === 'player';
     const img = castleImages[c.house];
     const half = CASTLE_IMG_SIZE / 2;
     const circleR = half + 4;
-
-    ctx.fillStyle = h.color;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, circleR, 0, Math.PI * 2);
-    ctx.fill();
 
     const processed = castleImagesNoBg[c.house];
     if (processed) {
@@ -410,12 +455,29 @@ function draw() {
       ctx.drawImage(img, c.x - half, c.y - half, CASTLE_IMG_SIZE, CASTLE_IMG_SIZE);
     }
 
+
     if (isSelected) {
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#39ff14';
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.arc(c.x, c.y, circleR + 2, 0, Math.PI * 2);
+      ctx.arc(c.x, c.y, circleR - 2, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    // Intro flash: player castle pulses green 3 times on game start
+    if (c.owner === 'player' && !gameOver) {
+      const elapsed = Date.now() - gameStartTime;
+      const flashDuration = AI_GRACE_MS;
+      if (elapsed < flashDuration) {
+        const pulsePeriod = flashDuration / 3;
+        const t = (elapsed % pulsePeriod) / pulsePeriod;
+        const alpha = Math.sin(t * Math.PI);
+        ctx.strokeStyle = `rgba(57, 255, 20, ${alpha * 0.9})`;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, circleR + 2 + alpha * 6, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     const troopStr = String(Math.floor(c.troops));
@@ -429,9 +491,54 @@ function draw() {
     ctx.strokeText(troopStr, c.x, c.y);
     ctx.fillStyle = '#fff';
     ctx.fillText(troopStr, c.x, c.y);
+
+    ctx.font = 'bold 11px Georgia';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.strokeText(c.name, c.x, c.y + half + 6);
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillText(c.name, c.x, c.y + half + 6);
   });
 
+  impactParticles = impactParticles.filter(p => p.alpha > 0);
+  impactParticles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.88;
+    p.vy *= 0.88;
+    p.alpha -= 0.045;
+    ctx.globalAlpha = Math.max(0, p.alpha);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  if (dragStartCastle && !debugEditMode && targetMarkerImage.complete && targetMarkerImage.naturalWidth) {
+    const sources = selectedCastles.length ? selectedCastles : [dragStartCastle];
+    const hoverTarget = getCastleAt(dragX, dragY);
+    if (hoverTarget && !sources.includes(hoverTarget)) {
+      const markerSize = (CASTLE_IMG_SIZE - 8) * 0.7;
+      const markerHalf = markerSize / 2;
+      ctx.drawImage(targetMarkerImage, hoverTarget.x - markerHalf, hoverTarget.y - markerHalf, markerSize, markerSize);
+    }
+  }
+
   if (!gameOver && !debugEditMode) {
+    ctx.font = 'bold 16px Georgia';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.strokeText('Army Size:', RATIO_BTN_X, RATIO_LABEL_Y);
+    ctx.fillStyle = '#c9a227';
+    ctx.fillText('Army Size:', RATIO_BTN_X, RATIO_LABEL_Y);
+
     RATIO_OPTIONS.forEach((opt, i) => {
       const bx = RATIO_BTN_X + i * (RATIO_BTN_W + RATIO_BTN_GAP);
       const by = RATIO_BTN_Y;
@@ -456,20 +563,46 @@ function draw() {
     if (elapsed < INSTRUCTION_FADE_MS) {
       const alpha = elapsed < INSTRUCTION_FADE_MS - 2000 ? 0.95 : (INSTRUCTION_FADE_MS - elapsed) / 2000 * 0.95;
       ctx.fillStyle = `rgba(0, 0, 0, ${alpha * 0.6})`;
-      ctx.fillRect(0, 72, W(), 38);
-      ctx.font = 'bold 16px Georgia';
+      const instrLines = [
+        { text: 'The realm is in rebellion!', gap: 14 },
+        { text: '' },
+        { text: 'Click & drag your troops from Kings Landing' },
+        { text: 'to defeat the rebels. Double tap your castle' },
+        { text: 'to select all.' },
+      ];
+      const instrY = H() / 2;
+      const lineH = 18;
+      const totalH = instrLines.length * lineH + 24;
+      ctx.fillRect(0, instrY - totalH / 2, W(), totalH);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
       ctx.lineWidth = 4;
       ctx.lineJoin = 'round';
-      ctx.strokeText('Drag troops from your keep to conquer rivals!', W() / 2, 91);
-      ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-      ctx.fillText('Drag troops from your keep to conquer rivals!', W() / 2, 91);
+      instrLines.forEach((entry, i) => {
+        if (!entry.text) return;
+        const ly = instrY - (instrLines.length / 2 - i - 0.5) * lineH;
+        ctx.font = i === 0 ? 'bold 14px Georgia' : 'bold 12px Georgia';
+        ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
+        ctx.strokeText(entry.text, W() / 2, ly);
+        ctx.fillStyle = i === 0 ? `rgba(255, 220, 80, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
+        ctx.fillText(entry.text, W() / 2, ly);
+      });
     }
+
+    const ctaX = W() - CTA_BTN_W - CTA_BTN_MARGIN;
+    const ctaY = CTA_BTN_MARGIN;
+    ctx.fillStyle = 'rgba(201, 162, 39, 0.95)';
+    ctx.beginPath();
+    ctx.roundRect(ctaX, ctaY, CTA_BTN_W, CTA_BTN_H, 6);
+    ctx.fill();
+    ctx.fillStyle = '#1a1a2e';
+    ctx.font = 'bold 12px Georgia';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Download', ctaX + CTA_BTN_W / 2, ctaY + CTA_BTN_H / 2);
   }
 
-  if (debugOverlay) {
+  if (DEBUG && debugOverlay) {
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.fillRect(0, 0, 140, 22 + castles.length * 14);
     ctx.fillStyle = '#c9a227';
@@ -477,38 +610,108 @@ function draw() {
     ctx.textAlign = 'left';
     ctx.fillText('Castle | Troops | Owner', 6, 14);
     castles.forEach((c, i) => {
-      ctx.fillStyle = c.owner === 'player' ? '#22c55e' : '#94a3b8';
+      ctx.fillStyle = c.owner === 'player' ? '#39ff14' : '#94a3b8';
       ctx.fillText(`${c.name || c.id} | ${Math.floor(c.troops)} | ${c.owner}`, 6, 28 + i * 14);
     });
     ctx.textAlign = 'center';
   }
 
-  if (gameOver === 'victory') {
-    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  if (gameOver) {
+    if (splashImage.complete && splashImage.naturalWidth) {
+      const imgAspect = splashImage.naturalWidth / splashImage.naturalHeight;
+      const canvasAspect = W() / H();
+      let sx = 0, sy = 0, sw = splashImage.naturalWidth, sh = splashImage.naturalHeight;
+      if (imgAspect > canvasAspect) {
+        sw = sh * canvasAspect;
+        sx = (splashImage.naturalWidth - sw) / 2;
+      } else {
+        sh = sw / canvasAspect;
+        sy = (splashImage.naturalHeight - sh) / 2;
+      }
+      ctx.drawImage(splashImage, sx, sy, sw, sh, 0, 0, W(), H());
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(0, 0, W(), H());
-    ctx.fillStyle = '#c9a227';
-    ctx.font = 'bold 28px Georgia';
+
+    const cx = W() / 2, cy = H() / 2;
+    const panelW = W() * 0.72, panelH = 230;
+    const panelX = cx - panelW / 2, panelY = H() - panelH - H() * 0.14;
+    const borderPulse = 0.6 + 0.4 * Math.sin(Date.now() * 0.003);
+
+    // Title area: fire splash behind logo, centered above panel
+    const titleW = W() * 0.88;
+    const titleCenterY = panelY * 0.48;
+    if (titleFireImage.complete && titleFireImage.naturalWidth) {
+      const fireAspect = titleFireImage.naturalWidth / titleFireImage.naturalHeight;
+      const fireW = titleW;
+      const fireH = fireW / fireAspect;
+      ctx.drawImage(titleFireImage, cx - fireW / 2, titleCenterY - fireH / 2, fireW, fireH);
+    }
+    if (titleLogoImage.complete && titleLogoImage.naturalWidth) {
+      const logoAspect = titleLogoImage.naturalWidth / titleLogoImage.naturalHeight;
+      const logoW = titleW * 0.82;
+      const logoH = logoW / logoAspect;
+      ctx.drawImage(titleLogoImage, cx - logoW / 2, titleCenterY - logoH / 2, logoW, logoH);
+    }
+
+    ctx.strokeStyle = gameOver === 'victory'
+      ? `rgba(201, 162, 39, ${borderPulse})`
+      : `rgba(192, 57, 43, ${borderPulse})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(panelX, panelY, panelW, panelH, 12);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+    ctx.beginPath();
+    ctx.roundRect(panelX, panelY, panelW, panelH, 12);
+    ctx.fill();
+
     ctx.textAlign = 'center';
-    ctx.fillText('Conquest Complete!', W() / 2, H() / 2 - 40);
-    ctx.fillStyle = '#c0c0c0';
-    ctx.font = '16px Georgia';
-    ctx.fillText('You have conquered Westeros.', W() / 2, H() / 2 - 10);
-    ctx.fillStyle = '#c9a227';
-    ctx.font = 'bold 16px Georgia';
-    ctx.fillText('Tap to claim the Iron Throne', W() / 2, H() / 2 + 30);
-  } else if (gameOver === 'defeat') {
-    ctx.fillStyle = 'rgba(0,0,0,0.8)';
-    ctx.fillRect(0, 0, W(), H());
-    ctx.fillStyle = '#c0392b';
-    ctx.font = 'bold 28px Georgia';
+
+    if (gameOver === 'victory') {
+      ctx.fillStyle = '#c9a227';
+      ctx.font = 'bold 26px Georgia';
+      ctx.fillText('Conquest Complete!', cx, panelY + 45);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '14px Georgia';
+      ctx.fillText('You have conquered Westeros.', cx, panelY + 75);
+    } else {
+      ctx.fillStyle = '#c0392b';
+      ctx.font = 'bold 26px Georgia';
+      ctx.fillText('Failed', cx, panelY + 45);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '14px Georgia';
+      ctx.fillText('Your forces have been vanquished.', cx, panelY + 75);
+    }
+
+    const btnW = panelW * 0.7, btnH = 44;
+    const btnX = cx - btnW / 2;
+    const ctaBtnY = panelY + 100;
     ctx.textAlign = 'center';
-    ctx.fillText('Defeat', W() / 2, H() / 2 - 40);
-    ctx.fillStyle = '#c0c0c0';
-    ctx.font = '16px Georgia';
-    ctx.fillText('Your castle has fallen.', W() / 2, H() / 2 - 10);
+    ctx.textBaseline = 'middle';
+
     ctx.fillStyle = '#c9a227';
-    ctx.font = 'bold 16px Georgia';
-    ctx.fillText('Tap to try again', W() / 2, H() / 2 + 30);
+    ctx.beginPath();
+    ctx.roundRect(btnX, ctaBtnY, btnW, btnH, 8);
+    ctx.fill();
+    ctx.fillStyle = '#1a1a2e';
+    ctx.font = 'bold 18px Georgia';
+    ctx.fillText('Download Now', cx, ctaBtnY + btnH / 2);
+
+    if (gameOver === 'defeat') {
+      const retryY = ctaBtnY + btnH + 14;
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(btnX, retryY, btnW, btnH, 8);
+      ctx.stroke();
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = 'bold 16px Georgia';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Try Again', cx, retryY + btnH / 2);
+    }
   }
 }
 
@@ -533,18 +736,46 @@ function toCanvasCoords(clientX, clientY) {
   };
 }
 
+function handleCTA() {
+  const STORE_URL = 'https://example.com/download';
+  if (typeof FbPlayableAd !== 'undefined' && FbPlayableAd.onCTAClick) {
+    FbPlayableAd.onCTAClick();
+  } else {
+    window.open(STORE_URL, '_blank');
+  }
+}
+
 function handlePointerDown(clientX, clientY) {
-  if (gameOver === 'defeat') {
-    initCastles();
+  if (gameOver) {
+    const { x, y } = toCanvasCoords(clientX, clientY);
+    const cx = W() / 2, cy = H() / 2;
+    const panelW = W() * 0.72, panelH = 230;
+    const panelY = H() - panelH - H() * 0.14;
+    const btnW = panelW * 0.7, btnH = 44;
+    const btnX = cx - btnW / 2;
+    const ctaBtnY = panelY + 100;
+    if (x >= btnX && x <= btnX + btnW && y >= ctaBtnY && y <= ctaBtnY + btnH) {
+      handleCTA();
+      return;
+    }
+    if (gameOver === 'defeat') {
+      const retryY = ctaBtnY + btnH + 14;
+      if (x >= btnX && x <= btnX + btnW && y >= retryY && y <= retryY + btnH) {
+        initCastles();
+        return;
+      }
+    }
     return;
   }
-  if (gameOver === 'victory') {
-    alert('Download Game of Thrones: Conquest');
-    return;
-  }
-  if (gameOver) return;
 
   const { x, y } = toCanvasCoords(clientX, clientY);
+
+  const ctaX = W() - CTA_BTN_W - CTA_BTN_MARGIN;
+  const ctaY = CTA_BTN_MARGIN;
+  if (x >= ctaX && x <= ctaX + CTA_BTN_W && y >= ctaY && y <= ctaY + CTA_BTN_H) {
+    handleCTA();
+    return;
+  }
 
   for (let i = 0; i < RATIO_OPTIONS.length; i++) {
     const bx = RATIO_BTN_X + i * (RATIO_BTN_W + RATIO_BTN_GAP);
@@ -611,19 +842,29 @@ function handlePointerUp(clientX, clientY) {
     sources.forEach(from => {
       if (from !== castle) sendTroops(from, castle);
     });
-    if (sources.length) selectedCastles = [];
-  } else if (!moved && dragStartCastle && dragStartCastle.owner === 'player') {
-    const now = Date.now();
-    if (lastTapCastle === dragStartCastle && now - lastTapTime < 350) {
-      selectedCastles = castles.filter(c => c.owner === 'player');
+    if (sources.length) { selectedCastles = []; selectAllMode = false; }
+  } else if (!moved) {
+    if (dragStartCastle && dragStartCastle.owner === 'player') {
+      const now = Date.now();
+      if (lastTapCastle === dragStartCastle && now - lastTapTime < 350) {
+        selectedCastles = castles.filter(c => c.owner === 'player');
+        selectAllMode = true;
+        lastTapCastle = null;
+        lastTapTime = 0;
+      } else {
+        selectAllMode = false;
+        const i = selectedCastles.indexOf(dragStartCastle);
+        if (i >= 0) selectedCastles.splice(i, 1);
+        else selectedCastles.push(dragStartCastle);
+        lastTapCastle = dragStartCastle;
+        lastTapTime = now;
+      }
+    } else {
+      // Tapped empty space or a non-player castle — clear all selections
+      selectedCastles = [];
+      selectAllMode = false;
       lastTapCastle = null;
       lastTapTime = 0;
-    } else {
-      const i = selectedCastles.indexOf(dragStartCastle);
-      if (i >= 0) selectedCastles.splice(i, 1);
-      else selectedCastles.push(dragStartCastle);
-      lastTapCastle = dragStartCastle;
-      lastTapTime = now;
     }
   }
 
@@ -646,15 +887,8 @@ canvas.addEventListener('pointercancel', () => {
   dragStartCastle = null;
 });
 
-document.querySelectorAll('#send-buttons button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.ratio == null) return;
-    sendRatio = parseFloat(btn.dataset.ratio);
-    document.querySelectorAll('#send-buttons button[data-ratio]').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-  });
-});
 
+if (DEBUG) document.getElementById('debug-btn').style.display = 'block';
 document.getElementById('debug-btn').addEventListener('click', () => {
   document.getElementById('debug-panel').classList.toggle('open');
 });
@@ -683,20 +917,128 @@ document.getElementById('dbg-export').addEventListener('click', () => {
   out.style.display = 'block';
 });
 
+function tintImage(sourceCanvas, color, opacity) {
+  const c = document.createElement('canvas');
+  c.width = sourceCanvas.width;
+  c.height = sourceCanvas.height;
+  const tctx = c.getContext('2d');
+  tctx.drawImage(sourceCanvas, 0, 0);
+  tctx.globalCompositeOperation = 'source-atop';
+  tctx.fillStyle = color;
+  tctx.globalAlpha = opacity;
+  tctx.fillRect(0, 0, c.width, c.height);
+  tctx.globalAlpha = 1;
+  tctx.globalCompositeOperation = 'source-over';
+  return c;
+}
+
+let assetsLoaded = false;
+let assetsTotal = 0;
+let assetsReady = 0;
+
+function trackAsset(img, onDone) {
+  assetsTotal++;
+  const orig = img.onload;
+  img.onload = () => {
+    if (orig) orig();
+    if (onDone) onDone();
+    assetsReady++;
+    if (assetsReady >= assetsTotal) {
+      assetsLoaded = true;
+      initCastles();
+      gameLoop();
+    }
+  };
+  img.onerror = () => {
+    assetsReady++;
+    if (assetsReady >= assetsTotal) {
+      assetsLoaded = true;
+      initCastles();
+      gameLoop();
+    }
+  };
+}
+
+function drawLoadingScreen() {
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W(), H());
+
+  ctx.fillStyle = '#c9a227';
+  ctx.font = 'bold 26px Georgia';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Conquest of Westeros', W() / 2, H() / 2 - 40);
+
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '14px Georgia';
+  ctx.fillText('Loading...', W() / 2, H() / 2 + 10);
+
+  const barW = W() * 0.5;
+  const barH = 6;
+  const barX = (W() - barW) / 2;
+  const barY = H() / 2 + 35;
+  ctx.fillStyle = '#1e293b';
+  ctx.beginPath();
+  ctx.roundRect(barX, barY, barW, barH, 3);
+  ctx.fill();
+
+  const progress = assetsTotal > 0 ? assetsReady / assetsTotal : 0;
+  if (progress > 0) {
+    ctx.fillStyle = '#c9a227';
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW * progress, barH, 3);
+    ctx.fill();
+  }
+
+  if (!assetsLoaded) requestAnimationFrame(drawLoadingScreen);
+}
+
 function loadCastleImages() {
   CASTLE_ASSETS.forEach(house => {
     const img = new Image();
-    img.onload = () => {
-      castleImagesNoBg[house] = removeBlackFromImage(img);
+    const processImg = () => {
+      try {
+        const size = img.naturalWidth;
+        const c = document.createElement('canvas');
+        c.width = size; c.height = size;
+        const cctx = c.getContext('2d');
+        cctx.save();
+        cctx.beginPath();
+        cctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+        cctx.clip();
+        cctx.drawImage(img, 0, 0);
+        cctx.globalCompositeOperation = 'source-atop';
+        cctx.fillStyle = HOUSES[house].color;
+        cctx.globalAlpha = 0.55;
+        cctx.fillRect(0, 0, size, size);
+        cctx.restore();
+        castleImagesNoBg[house] = c;
+      } catch (_) {}
     };
+    trackAsset(img, processImg);
     img.src = `assets/${house}.png`;
     castleImages[house] = img;
   });
 }
 
+trackAsset(mapImage);
+mapImage.src = 'assets/map.png';
+trackAsset(knightImage);
+knightImage.src = 'assets/fleet-icon.png';
+trackAsset(selectionMarkerImage);
+selectionMarkerImage.src = 'assets/selection-marker.png';
+trackAsset(targetMarkerImage);
+targetMarkerImage.src = 'assets/target-marker.png';
+trackAsset(splashImage);
+splashImage.src = 'assets/splash.png';
+trackAsset(marchLineImage);
+marchLineImage.src = 'assets/march-line.png';
+trackAsset(titleFireImage);
+titleFireImage.src = 'assets/title-fire.png';
+trackAsset(titleLogoImage);
+titleLogoImage.src = 'assets/title-logo.png';
 loadCastleImages();
-initCastles();
-gameLoop();
+drawLoadingScreen();
 </script>
 </body>
 </html>
