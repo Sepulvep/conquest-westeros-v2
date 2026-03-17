@@ -149,7 +149,7 @@ const AI_COOLDOWN_MAX = 160;
 const AI_MIN_TROOPS = 20;
 const AI_GARRISON = 15;
 const AI_GRACE_MS = 8500;
-const AI_PLAYER_SAFETY_MS = 30000;
+const AI_PLAYER_SAFETY_MS = 20000;
 const CASTLE_IMG_SIZE = 68;
 const FLEET_SPEED = 1.28;
 
@@ -215,6 +215,8 @@ const bgMusic = new Audio('assets/music.mp3');
 bgMusic.loop = true;
 bgMusic.volume = 0.4;
 let musicStarted = false;
+const sfxVictory = new Audio('assets/sfx_victory.wav');
+sfxVictory.volume = 1.0;
 function tryStartMusic() {
   if (musicStarted) return;
   musicStarted = true;
@@ -375,7 +377,11 @@ function update() {
   const enemyCastles = castles.filter(c => c.owner !== 'player');
   const playerFleets = fleets.filter(f => f.owner === 'player');
   if (playerCastles.length === 0 && playerFleets.length === 0) gameOver = 'defeat';
-  if (enemyCastles.length === 0) gameOver = 'victory';
+  if (enemyCastles.length === 0) {
+    gameOver = 'victory';
+    sfxVictory.currentTime = 0;
+    sfxVictory.play().catch(() => {});
+  }
 }
 
 function draw() {
