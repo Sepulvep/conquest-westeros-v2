@@ -78,7 +78,7 @@
 <div id="game-wrap">
   <canvas id="gameCanvas"></canvas>
 </div>
-<button id="debug-btn">Debug</button>
+<button id="debug-btn" style="display:none">Debug</button>
 <div id="debug-panel">
   <h3>Debug Menu</h3>
   <label><input type="checkbox" id="dbg-edit"> Edit castle positions</label>
@@ -93,7 +93,7 @@
   <pre id="dbg-export-output" style="display:none; font-size:9px; max-height:200px; overflow:auto; background:#0f172a; padding:6px; border-radius:4px; margin-top:6px; word-break:break-all; user-select:all;"></pre>
 </div>
 <script>
-const DEBUG = true;
+const DEBUG = false;
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
@@ -129,15 +129,15 @@ const HOUSES = {
 
 // ─── CASTLES ──────────────────────────────────────────────
 const CASTLE_DEFS = [
-  { id: 'winterfell',  house: 'stark',     owner: 'neutral', troops: 50,  px: 0.5402, py: 0.2698, name: 'Winterfell' },
-  { id: 'pyke',        house: 'greyjoy',   owner: 'neutral', troops: 50,  px: 0.1501, py: 0.4020, name: 'Pyke' },
-  { id: 'riverrun',    house: 'tully',     owner: 'neutral', troops: 50,  px: 0.4474, py: 0.5697, name: 'Riverrun' },
-  { id: 'casterly',    house: 'lannister', owner: 'neutral', troops: 50,  px: 0.1832, py: 0.6469, name: 'Casterly Rock' },
-  { id: 'dragonstone', house: 'targaryen', owner: 'player',  troops: 100, px: 0.6313, py: 0.7579, name: "King's Landing" },
-  { id: 'stormsend',   house: 'baratheon', owner: 'neutral', troops: 50,  px: 0.9072, py: 0.6979, name: "Storm's End" },
-  { id: 'sunspear',    house: 'martell',   owner: 'neutral', troops: 50,  px: 0.7364, py: 0.9265, name: 'Sunspear' },
-  { id: 'highgarden',  house: 'tyrell',    owner: 'neutral', troops: 50,  px: 0.2790, py: 0.8606, name: 'Highgarden' },
-  { id: 'eyrie',       house: 'arryn',     owner: 'neutral', troops: 50,  px: 0.7561, py: 0.5702, name: "The Eyrie" },
+  { id: 'winterfell',  house: 'stark',     owner: 'stark',   troops: 100, px: 0.5334, py: 0.2837, name: 'Winterfell', asset: 'targaryen' },
+  { id: 'pyke',        house: 'greyjoy',   owner: 'neutral', troops: 30,  px: 0.1937, py: 0.4524, name: 'Pyke' },
+  { id: 'riverrun',    house: 'tully',     owner: 'neutral', troops: 30,  px: 0.4423, py: 0.5222, name: 'Riverrun' },
+  { id: 'casterly',    house: 'lannister', owner: 'neutral', troops: 30,  px: 0.2311, py: 0.5941, name: 'Casterly Rock' },
+  { id: 'dragonstone', house: 'targaryen', owner: 'player',  troops: 100, px: 0.5629, py: 0.6438, name: "King's Landing" },
+  { id: 'stormsend',   house: 'baratheon', owner: 'neutral', troops: 30,  px: 0.6944, py: 0.7631, name: "Storm's End" },
+  { id: 'sunspear',    house: 'martell',   owner: 'neutral', troops: 30,  px: 0.7407, py: 0.8896, name: 'Sunspear' },
+  { id: 'highgarden',  house: 'tyrell',    owner: 'neutral', troops: 30,  px: 0.3328, py: 0.7397, name: 'Highgarden' },
+  { id: 'eyrie',       house: 'arryn',     owner: 'neutral', troops: 30,  px: 0.7510, py: 0.5582, name: "The Eyrie" },
 ];
 
 const TROOP_GROWTH = 0.03;
@@ -156,6 +156,9 @@ const FLEET_SPEED = 1.28;
 const CASTLE_ASSETS = ['stark', 'lannister', 'targaryen', 'baratheon', 'greyjoy', 'tully', 'martell', 'tyrell', 'arryn'];
 let castleImages = {};
 let castleImagesNoBg = {};
+let castleImagesBlue = {};
+let castleImagesRed = {};
+let castleImagesGrey = {};
 function removeEdgeBgFromImage(img, isDark) {
   const c = document.createElement('canvas');
   const w = img.naturalWidth;
@@ -236,7 +239,10 @@ const RATIO_OPTIONS = [
   { ratio: 0.5,  label: '50%' },
   { ratio: 1,    label: '100%' },
 ];
-const RATIO_BTN_W = 50, RATIO_BTN_H = 32, RATIO_BTN_GAP = 6, RATIO_BTN_X = 8, RATIO_BTN_Y = 52, RATIO_LABEL_Y = 42;
+const RATIO_BTN_W = 50, RATIO_BTN_H = 32, RATIO_BTN_GAP = 6;
+const RATIO_BTN_X = 10;
+function RATIO_BTN_Y()   { return H() - RATIO_BTN_H - 14; }
+function RATIO_LABEL_Y() { return H() - RATIO_BTN_H - 22; }
 const INSTRUCTION_FADE_MS = 8000;
 const CTA_BTN_W = 90, CTA_BTN_H = 30, CTA_BTN_MARGIN = 8;
 let lastTapTime = 0;
@@ -258,7 +264,7 @@ function initCastles() {
       x: W() * px,
       y: H() * py,
       troops: c.troops,
-      owner: c.owner === 'player' ? 'player' : c.house,
+      owner: c.owner === 'player' ? 'player' : (c.owner === 'neutral' ? 'neutral' : c.house),
     };
   });
   fleets = [];
@@ -294,13 +300,14 @@ function runAI() {
   if (elapsed < AI_GRACE_MS) return;
   const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   castles.forEach(c => {
-    if (c.owner === 'player') return;
+    if (c.owner === 'player' || c.owner === 'neutral') return;
     const cd = aiCooldowns[c.id] ?? 0;
     if (cd > 0) { aiCooldowns[c.id] = cd - 1; return; }
     if (c.troops < AI_MIN_TROOPS) return;
 
     const others = castles.filter(t => t !== c && t.owner !== c.owner);
     if (others.length === 0) return;
+    // Prefer neutral and other AI castles; only target player after safety period
     let targets = others.filter(t => t.owner !== 'player');
     if (targets.length === 0 || elapsed >= AI_PLAYER_SAFETY_MS) targets = others;
     const nearest = targets.reduce((a, b) => (d(c, a) < d(c, b) ? a : b));
@@ -331,7 +338,7 @@ function update() {
   if (debugEditMode) return;
 
   castles.forEach(c => {
-    c.troops += TROOP_GROWTH;
+    if (c.owner !== 'neutral') c.troops += TROOP_GROWTH;
   });
 
   runAI();
@@ -374,10 +381,11 @@ function update() {
   selectedCastles = selectedCastles.filter(c => c.owner === 'player');
 
   const playerCastles = castles.filter(c => c.owner === 'player');
-  const enemyCastles = castles.filter(c => c.owner !== 'player');
+  const enemyCastles = castles.filter(c => c.owner !== 'player' && c.owner !== 'neutral');
   const playerFleets = fleets.filter(f => f.owner === 'player');
   if (playerCastles.length === 0 && playerFleets.length === 0) gameOver = 'defeat';
-  if (enemyCastles.length === 0) {
+  const nonNeutralNonPlayer = castles.filter(c => c.owner !== 'player' && c.owner !== 'neutral');
+  if (nonNeutralNonPlayer.length === 0 && playerCastles.length > 0) {
     gameOver = 'victory';
     sfxVictory.currentTime = 0;
     sfxVictory.play().catch(() => {});
@@ -475,11 +483,14 @@ function draw() {
     const h = HOUSES[c.house];
     const isSelected = selectedCastles.includes(c);
     const isPlayerCastle = c.owner === 'player';
-    const img = castleImages[c.house];
+    const assetKey = c.asset || c.house;
+    const img = castleImages[assetKey];
     const half = CASTLE_IMG_SIZE / 2;
     const circleR = half + 4;
 
-    const processed = castleImagesNoBg[c.house];
+    const processed = c.owner === 'player' ? castleImagesBlue[assetKey]
+                    : c.owner === 'neutral' ? castleImagesGrey[assetKey]
+                    : castleImagesRed[assetKey];
     if (processed) {
       ctx.drawImage(processed, 0, 0, processed.width, processed.height, c.x - half, c.y - half, CASTLE_IMG_SIZE, CASTLE_IMG_SIZE);
     } else if (img && img.complete && img.naturalWidth) {
@@ -551,9 +562,10 @@ function draw() {
     const playerCastle = castles.find(c => c.owner === 'player');
     const enemies = castles.filter(c => c.owner !== 'player');
     if (elapsed < GHOST_TOTAL && playerCastle && enemies.length) {
-      const nearestEnemy = enemies.reduce((a, b) =>
-        Math.hypot(b.x - playerCastle.x, b.y - playerCastle.y) <
-        Math.hypot(a.x - playerCastle.x, a.y - playerCastle.y) ? b : a);
+      const nearestEnemy = castles.find(c => c.id === 'stormsend') ||
+        enemies.reduce((a, b) =>
+          Math.hypot(b.x - playerCastle.x, b.y - playerCastle.y) <
+          Math.hypot(a.x - playerCastle.x, a.y - playerCastle.y) ? b : a);
 
       const FADE_IN   = 700;
       const TAP_DOWN  = 1200;
@@ -627,13 +639,13 @@ function draw() {
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 3;
     ctx.lineJoin = 'round';
-    ctx.strokeText('Army Size:', RATIO_BTN_X, RATIO_LABEL_Y);
+    ctx.strokeText('Army Size:', RATIO_BTN_X, RATIO_LABEL_Y());
     ctx.fillStyle = '#c9a227';
-    ctx.fillText('Army Size:', RATIO_BTN_X, RATIO_LABEL_Y);
+    ctx.fillText('Army Size:', RATIO_BTN_X, RATIO_LABEL_Y());
 
     RATIO_OPTIONS.forEach((opt, i) => {
       const bx = RATIO_BTN_X + i * (RATIO_BTN_W + RATIO_BTN_GAP);
-      const by = RATIO_BTN_Y;
+      const by = RATIO_BTN_Y();
       const active = sendRatio === opt.ratio;
       ctx.fillStyle = active ? 'rgba(201, 162, 39, 0.95)' : 'rgba(15, 23, 42, 0.9)';
       ctx.beginPath();
@@ -652,6 +664,60 @@ function draw() {
     });
 
     const elapsed = Date.now() - gameStartTime;
+
+    // Intro text: fades in then out
+    const INTRO_FADE_IN = 500;
+    const INTRO_HOLD = 4000;
+    const INTRO_FADE_OUT = 5500;
+    if (elapsed < INTRO_FADE_OUT) {
+      let alpha;
+      if (elapsed < INTRO_FADE_IN) alpha = elapsed / INTRO_FADE_IN;
+      else if (elapsed < INTRO_HOLD) alpha = 1;
+      else alpha = 1 - (elapsed - INTRO_HOLD) / (INTRO_FADE_OUT - INTRO_HOLD);
+      alpha = Math.max(0, Math.min(1, alpha)) * 0.95;
+
+      const line1 = 'Capture enemy';
+      const highlight = 'strongholds';
+      const line2 = 'to crush the rebels';
+      const line3 = 'and secure your throne!';
+      const font = 'bold 18px BentonSans, sans-serif';
+      const iy = H() / 2;
+      const lineH = 26;
+
+      // Dark background strip
+      ctx.fillStyle = `rgba(0,0,0,${alpha * 0.55})`;
+      ctx.fillRect(0, iy - lineH * 2, W(), lineH * 4 + 8);
+
+      ctx.font = font;
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 4;
+      ctx.lineJoin = 'round';
+
+      // Line 1: "Capture enemy strongholds" — measure to split color mid-line
+      const l1Full = line1 + ' ' + highlight;
+      const l1W = ctx.measureText(l1Full).width;
+      const l1x = W() / 2 - l1W / 2;
+      const l1y = iy - lineH;
+
+      ctx.strokeStyle = `rgba(0,0,0,${alpha})`;
+      ctx.textAlign = 'left';
+      ctx.strokeText(line1 + ' ', l1x, l1y);
+      ctx.strokeText(highlight, l1x + ctx.measureText(line1 + ' ').width, l1y);
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.fillText(line1 + ' ', l1x, l1y);
+      ctx.fillStyle = `rgba(220,80,60,${alpha})`;
+      ctx.fillText(highlight, l1x + ctx.measureText(line1 + ' ').width, l1y);
+
+      // Lines 2 & 3
+      ctx.textAlign = 'center';
+      [line2, line3].forEach((line, i) => {
+        const ly = iy + i * lineH;
+        ctx.strokeStyle = `rgba(0,0,0,${alpha})`;
+        ctx.strokeText(line, W() / 2, ly);
+        ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+        ctx.fillText(line, W() / 2, ly);
+      });
+    }
 
     const ctaX = W() - CTA_BTN_W - CTA_BTN_MARGIN;
     const ctaY = CTA_BTN_MARGIN;
@@ -739,7 +805,7 @@ function draw() {
       ctx.fillText('Conquest Complete!', cx, panelY + 45);
       ctx.fillStyle = '#cbd5e1';
       ctx.font = '14px BentonSans, sans-serif';
-      ctx.fillText('You have conquered Westeros.', cx, panelY + 75);
+      ctx.fillText('Tap to claim the Iron Throne!', cx, panelY + 75);
     } else {
       ctx.fillStyle = '#c0392b';
       ctx.font = 'bold 26px GoudyTrajan, Georgia';
@@ -845,7 +911,7 @@ function handlePointerDown(clientX, clientY) {
 
   for (let i = 0; i < RATIO_OPTIONS.length; i++) {
     const bx = RATIO_BTN_X + i * (RATIO_BTN_W + RATIO_BTN_GAP);
-    if (x >= bx && x <= bx + RATIO_BTN_W && y >= RATIO_BTN_Y && y <= RATIO_BTN_Y + RATIO_BTN_H) {
+    if (x >= bx && x <= bx + RATIO_BTN_W && y >= RATIO_BTN_Y() && y <= RATIO_BTN_Y() + RATIO_BTN_H) {
       sendRatio = RATIO_OPTIONS[i].ratio;
       return;
     }
@@ -1060,26 +1126,33 @@ function drawLoadingScreen() {
   if (!assetsLoaded) requestAnimationFrame(drawLoadingScreen);
 }
 
+function makeTintedCastle(img, tintColor) {
+  const size = img.naturalWidth;
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const cctx = c.getContext('2d');
+  cctx.save();
+  cctx.beginPath();
+  cctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  cctx.clip();
+  cctx.drawImage(img, 0, 0);
+  cctx.globalCompositeOperation = 'source-atop';
+  cctx.fillStyle = tintColor;
+  cctx.globalAlpha = 0.6;
+  cctx.fillRect(0, 0, size, size);
+  cctx.restore();
+  return c;
+}
+
 function loadCastleImages() {
   CASTLE_ASSETS.forEach(house => {
     const img = new Image();
     const processImg = () => {
       try {
-        const size = img.naturalWidth;
-        const c = document.createElement('canvas');
-        c.width = size; c.height = size;
-        const cctx = c.getContext('2d');
-        cctx.save();
-        cctx.beginPath();
-        cctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-        cctx.clip();
-        cctx.drawImage(img, 0, 0);
-        cctx.globalCompositeOperation = 'source-atop';
-        cctx.fillStyle = HOUSES[house].color;
-        cctx.globalAlpha = 0.55;
-        cctx.fillRect(0, 0, size, size);
-        cctx.restore();
-        castleImagesNoBg[house] = c;
+        castleImagesBlue[house] = makeTintedCastle(img, '#1d6fd1');
+        castleImagesRed[house]  = makeTintedCastle(img, '#c0392b');
+        castleImagesGrey[house] = makeTintedCastle(img, '#6b7280');
+        castleImagesNoBg[house] = castleImagesGrey[house]; // default before ownership known
       } catch (_) {}
     };
     trackAsset(img, processImg);
