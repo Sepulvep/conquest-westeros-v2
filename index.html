@@ -199,6 +199,10 @@ let mapImage = new Image();
 let knightImage = new Image();
 let knightImageNoBg = null;
 knightImage.onload = () => { try { knightImageNoBg = removeEdgeBgFromImage(knightImage, false); } catch (_) { knightImageNoBg = null; } };
+let knightRunBlue = new Image();
+let knightRunRed = new Image();
+let knightSheetBlue = new Image();
+let knightSheetRed = new Image();
 let selectionMarkerImage = new Image();
 let targetMarkerImage = new Image();
 let splashImage = new Image();
@@ -209,6 +213,25 @@ let pointerImage = new Image();
 
 let castles = [];
 let fleets = [];
+let attackAnimations = [];
+
+const SPRITE_FRAME_W = 69;
+const SPRITE_FRAME_H = 58;
+const SPRITE_RUN_FRAMES = 6;
+const SPRITE_ATTACK_FRAMES = 9;
+const SPRITE_FPS = 10;
+let spriteRunFrame = 0;
+let spriteRunTimer = 0;
+
+function getSlashFrameRect(frame) {
+  // Animations are packed sequentially, 5 frames per row.
+  // Slash starts at absolute index 36 (row 7, col 1).
+  const absIdx = 36 + frame;
+  const row = Math.floor(absIdx / 5);
+  const col = absIdx % 5;
+  return { sx: col * SPRITE_FRAME_W, sy: row * SPRITE_FRAME_H };
+}
+
 let dragStartCastle = null;
 let dragX = 0, dragY = 0;
 let selectedCastles = [];
@@ -343,11 +366,29 @@ function update() {
 
   runAI();
 
+  const now = Date.now();
+  spriteRunTimer += 16;
+  if (spriteRunTimer >= 1000 / SPRITE_FPS) {
+    spriteRunFrame = (spriteRunFrame + 1) % SPRITE_RUN_FRAMES;
+    spriteRunTimer = 0;
+  }
+
+  attackAnimations.forEach(a => {
+    a.timer += 16;
+    if (a.timer >= 1000 / SPRITE_FPS) {
+      a.frame++;
+      a.timer = 0;
+    }
+  });
+  attackAnimations = attackAnimations.filter(a => a.frame < SPRITE_ATTACK_FRAMES);
+
   fleets.forEach(f => {
     const dx = f.target.x - f.x;
     const dy = f.target.y - f.y;
     const dist = Math.hypot(dx, dy);
     if (dist < FLEET_SPEED) {
+      const arrivalAngle = Math.atan2(f.target.y - f.y, f.target.x - f.x);
+      attackAnimations.push({ x: f.target.x, y: f.target.y, frame: 0, timer: 0, owner: f.owner, angle: arrivalAngle });
       if (f.target.owner === f.owner) {
         f.target.troops += f.troops;
       } else {
@@ -356,15 +397,14 @@ function update() {
           f.target.owner = f.owner;
           f.target.house = f.house;
           f.target.troops = Math.abs(f.target.troops);
-          const angle = Math.atan2(f.target.y - f.y, f.target.x - f.x);
           const color = HOUSES[f.house]?.color || '#fff';
           for (let p = 0; p < 10; p++) {
             const spread = (Math.random() - 0.5) * 1.2;
             const speed = 1.5 + Math.random() * 2;
             impactParticles.push({
               x: f.target.x, y: f.target.y,
-              vx: Math.cos(angle + spread) * speed,
-              vy: Math.sin(angle + spread) * speed,
+              vx: Math.cos(arrivalAngle + spread) * speed,
+              vy: Math.sin(arrivalAngle + spread) * speed,
               alpha: 1, size: 2 + Math.random() * 3, color
             });
           }
@@ -421,29 +461,17 @@ function draw() {
       const dist = Math.hypot(dx, dy);
       if (dist < 5) return;
       const angle = Math.atan2(dy, dx);
-      if (marchLineImage.complete && marchLineImage.naturalWidth) {
-        const tileH = 18;
-        const tileW = marchLineImage.naturalWidth * (tileH / marchLineImage.naturalHeight);
-        const count = Math.ceil(dist / tileW);
-        ctx.save();
-        ctx.translate(c.x, c.y);
-        ctx.rotate(angle);
-        for (let t = 0; t < count; t++) {
-          ctx.drawImage(marchLineImage, t * tileW, -tileH / 2, tileW, tileH);
-        }
-        ctx.restore();
-      } else {
-        ctx.strokeStyle = 'rgba(201, 162, 39, 0.6)';
-        ctx.lineWidth = 3;
-        ctx.setLineDash([6, 4]);
-        ctx.beginPath();
-        ctx.moveTo(c.x, c.y);
-        ctx.lineTo(dragX, dragY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-      const arrLen = 12;
-      ctx.fillStyle = 'rgba(201, 162, 39, 0.8)';
+      ctx.strokeStyle = 'rgba(201, 162, 39, 0.85)';
+      ctx.lineWidth = 5;
+      ctx.setLineDash([10, 6]);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(dragX, dragY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const arrLen = 16;
+      ctx.fillStyle = 'rgba(201, 162, 39, 0.9)';
       ctx.beginPath();
       ctx.moveTo(dragX, dragY);
       ctx.lineTo(dragX - arrLen * Math.cos(angle - 0.4), dragY - arrLen * Math.sin(angle - 0.4));
@@ -452,31 +480,6 @@ function draw() {
       ctx.fill();
     });
   }
-
-  fleets.forEach(f => {
-    const h = HOUSES[f.house] || HOUSES.stark;
-    const src = knightImageNoBg || (knightImage.complete && knightImage.naturalWidth ? knightImage : null);
-    const fleetH = 54;
-    const fleetW = src ? Math.round(src.width * (fleetH / src.height)) : fleetH;
-    if (src) {
-      ctx.drawImage(src, 0, 0, src.width, src.height, f.x - fleetW / 2, f.y - fleetH / 2, fleetW, fleetH);
-    } else {
-      ctx.fillStyle = h.color;
-      ctx.beginPath();
-      ctx.arc(f.x, f.y, 14, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    const troopBadge = String(Math.floor(f.troops));
-    ctx.font = 'bold 9px BentonSans, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.beginPath();
-    ctx.arc(f.x + fleetW / 2 - 4, f.y - fleetH / 2 + 4, 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.fillText(troopBadge, f.x + fleetW / 2 - 4, f.y - fleetH / 2 + 4);
-  });
 
   const pulseT = Date.now() * 0.003;
   castles.forEach(c => {
@@ -499,11 +502,13 @@ function draw() {
 
 
     if (isSelected) {
-      ctx.strokeStyle = '#39ff14';
+      ctx.strokeStyle = 'rgba(201, 162, 39, 0.9)';
       ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 4]);
       ctx.beginPath();
       ctx.arc(c.x, c.y, circleR - 2, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.setLineDash([]);
     }
 
 
@@ -542,6 +547,54 @@ function draw() {
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
     ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  const FLEET_DRAW_H = 54;
+  const FLEET_DRAW_W = SPRITE_FRAME_W * (FLEET_DRAW_H / SPRITE_FRAME_H);
+
+  fleets.forEach(f => {
+    const runSheet = f.owner === 'player' ? knightRunBlue : knightRunRed;
+    const angle = Math.atan2(f.target.y - f.y, f.target.x - f.x);
+    const facingLeft = Math.cos(angle) < 0;
+    if (runSheet.complete && runSheet.naturalWidth) {
+      const frameX = spriteRunFrame * SPRITE_FRAME_W;
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      if (!facingLeft) ctx.scale(-1, 1);
+      ctx.drawImage(runSheet, frameX, 0, SPRITE_FRAME_W, SPRITE_FRAME_H,
+        -FLEET_DRAW_W / 2, -FLEET_DRAW_H / 2, FLEET_DRAW_W, FLEET_DRAW_H);
+      ctx.restore();
+    } else {
+      const h = HOUSES[f.house] || HOUSES.stark;
+      ctx.fillStyle = h.color;
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, 14, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const troopBadge = String(Math.floor(f.troops));
+    ctx.font = 'bold 9px BentonSans, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.beginPath();
+    ctx.arc(f.x, f.y - FLEET_DRAW_H / 2 - 6, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(troopBadge, f.x, f.y - FLEET_DRAW_H / 2 - 6);
+  });
+
+  attackAnimations.forEach(a => {
+    const sheet = a.owner === 'player' ? knightSheetBlue : knightSheetRed;
+    if (!sheet.complete || !sheet.naturalWidth) return;
+    const { sx, sy } = getSlashFrameRect(a.frame);
+    const facingLeft = Math.cos(a.angle) < 0;
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    if (!facingLeft) ctx.scale(-1, 1);
+    ctx.drawImage(sheet, sx, sy, SPRITE_FRAME_W, SPRITE_FRAME_H,
+      -FLEET_DRAW_W / 2, -FLEET_DRAW_H / 2, FLEET_DRAW_W, FLEET_DRAW_H);
+    ctx.restore();
   });
   ctx.globalAlpha = 1;
 
@@ -1165,12 +1218,20 @@ trackAsset(mapImage);
 mapImage.src = 'assets/map.png';
 trackAsset(knightImage);
 knightImage.src = 'assets/fleet-icon.png';
+trackAsset(knightRunBlue);
+knightRunBlue.src = 'assets/knight-run-blue.png';
+trackAsset(knightRunRed);
+knightRunRed.src = 'assets/knight-run-red.png';
+trackAsset(knightSheetBlue);
+knightSheetBlue.src = 'assets/knight-sheet-blue.png';
+trackAsset(knightSheetRed);
+knightSheetRed.src = 'assets/knight-sheet-red.png';
 trackAsset(selectionMarkerImage);
 selectionMarkerImage.src = 'assets/selection-marker.png';
 trackAsset(targetMarkerImage);
 targetMarkerImage.src = 'assets/target-marker.png';
 trackAsset(splashImage);
-splashImage.src = 'assets/splash.png';
+splashImage.src = 'assets/splash.jpg';
 trackAsset(marchLineImage);
 marchLineImage.src = 'assets/march-line.png';
 trackAsset(titleFireImage);
