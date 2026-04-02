@@ -22,7 +22,8 @@ asset_files = [
     'BentonSans-Cond.otf', 'BentonSans-CondBold.otf', 'GoudyTrajan-Bold.otf',
     'map.png', 'fleet-icon.png', 'target-marker.png', 'splash.jpg',
     'march-line.png', 'title-fire.png', 'title-logo.png', 'pointer.png', 'music.mp3',
-    'knight-run-blue.png', 'knight-run-red.png', 'knight-sheet-blue.png', 'knight-sheet-red.png'
+    'knight-run-blue.png', 'knight-run-red.png', 'knight-sheet-blue.png', 'knight-sheet-red.png',
+    'sfx_victory_castle.mp3', 'sfx_defeat.mp3', 'sfx_roar.mp3'
 ]
 houses = ['stark', 'lannister', 'targaryen', 'baratheon', 'greyjoy', 'tully', 'martell', 'tyrell', 'arryn']
 
@@ -74,6 +75,20 @@ asset_replacements = {
     "knightSheetBlue.src = 'assets/knight-sheet-blue.png'": f"knightSheetBlue.src = '{b64['knight-sheet-blue.png']}'",
     "knightSheetRed.src = 'assets/knight-sheet-red.png'": f"knightSheetRed.src = '{b64['knight-sheet-red.png']}'",
 }
+
+# Replace castle SFX audio
+game_code = game_code.replace(
+    "const sfxCastleVictory = new Audio('assets/sfx_victory_castle.mp3');",
+    f"const sfxCastleVictory = new Audio('{b64['sfx_victory_castle.mp3']}');"
+)
+game_code = game_code.replace(
+    "const sfxCastleDefeat = new Audio('assets/sfx_defeat.mp3');",
+    f"const sfxCastleDefeat = new Audio('{b64['sfx_defeat.mp3']}');"
+)
+game_code = game_code.replace(
+    "const sfxRoar = new Audio('assets/sfx_roar.mp3');",
+    f"const sfxRoar = new Audio('{b64['sfx_roar.mp3']}');"
+)
 for old, new in asset_replacements.items():
     game_code = game_code.replace(old, new)
 

@@ -224,13 +224,14 @@ let spriteRunFrame = 0;
 let spriteRunTimer = 0;
 
 function getSlashFrameRect(frame) {
-  // Animations are packed sequentially, 5 frames per row.
-  // Slash starts at absolute index 36 (row 7, col 1).
+  // Animations packed sequentially, 5 per row. Slash starts at absolute index 36.
   const absIdx = 36 + frame;
   const row = Math.floor(absIdx / 5);
   const col = absIdx % 5;
   return { sx: col * SPRITE_FRAME_W, sy: row * SPRITE_FRAME_H };
 }
+
+
 
 let dragStartCastle = null;
 let dragX = 0, dragY = 0;
@@ -243,6 +244,12 @@ bgMusic.volume = 0.4;
 let musicStarted = false;
 const sfxVictory = new Audio('assets/sfx_victory.wav');
 sfxVictory.volume = 1.0;
+const sfxCastleVictory = new Audio('assets/sfx_victory_castle.mp3');
+sfxCastleVictory.volume = 0.8;
+const sfxCastleDefeat = new Audio('assets/sfx_defeat.mp3');
+sfxCastleDefeat.volume = 0.8;
+const sfxRoar = new Audio('assets/sfx_roar.mp3');
+sfxRoar.volume = 1.0;
 function tryStartMusic() {
   if (musicStarted) return;
   musicStarted = true;
@@ -388,15 +395,21 @@ function update() {
     const dist = Math.hypot(dx, dy);
     if (dist < FLEET_SPEED) {
       const arrivalAngle = Math.atan2(f.target.y - f.y, f.target.x - f.x);
-      attackAnimations.push({ x: f.target.x, y: f.target.y, frame: 0, timer: 0, owner: f.owner, angle: arrivalAngle });
       if (f.target.owner === f.owner) {
         f.target.troops += f.troops;
       } else {
         f.target.troops -= f.troops;
         if (f.target.troops < 0) {
+          attackAnimations.push({ x: f.target.x, y: f.target.y, frame: 0, timer: 0, owner: f.owner, angle: arrivalAngle });
+          const wasPlayerCastle = f.target.owner === 'player';
           f.target.owner = f.owner;
           f.target.house = f.house;
           f.target.troops = Math.abs(f.target.troops);
+          if (f.owner === 'player') {
+            sfxCastleVictory.currentTime = 0; sfxCastleVictory.play().catch(() => {});
+          } else if (wasPlayerCastle) {
+            sfxCastleDefeat.currentTime = 0; sfxCastleDefeat.play().catch(() => {});
+          }
           const color = HOUSES[f.house]?.color || '#fff';
           for (let p = 0; p < 10; p++) {
             const spread = (Math.random() - 0.5) * 1.2;
@@ -429,6 +442,8 @@ function update() {
     gameOver = 'victory';
     sfxVictory.currentTime = 0;
     sfxVictory.play().catch(() => {});
+    sfxRoar.currentTime = 0;
+    sfxRoar.play().catch(() => {});
   }
 }
 
@@ -871,8 +886,6 @@ function draw() {
     const btnW = panelW * 0.7, btnH = 44;
     const btnX = cx - btnW / 2;
     const ctaBtnY = panelY + 100;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
 
     ctx.fillStyle = '#c9a227';
     ctx.beginPath();
@@ -880,6 +893,8 @@ function draw() {
     ctx.fill();
     ctx.fillStyle = '#1a1a2e';
     ctx.font = 'bold 18px BentonSans, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     ctx.fillText('Download Now', cx, ctaBtnY + btnH / 2);
 
     if (gameOver === 'defeat') {
